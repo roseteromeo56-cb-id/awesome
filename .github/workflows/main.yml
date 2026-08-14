@@ -3,6 +3,9 @@ on:
     branches: [main]
     paths:
       - 'readme.md'
+      - '.github/workflows/main.yml'
+      - '.github/workflows/repo_linter.sh'
+      - 'tests/repo_linter_test.sh'
 jobs:
   lint:
     runs-on: ubuntu-latest
@@ -10,5 +13,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - name: repo-linter regression tests
+        run: bash tests/repo_linter_test.sh
       - name: awesome-lint
         run: ./.github/workflows/repo_linter.sh
