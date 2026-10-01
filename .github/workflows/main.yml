@@ -5,6 +5,9 @@ on:
     branches: [main]
     paths:
       - 'readme.md'
+      - '.github/workflows/main.yml'
+      - '.github/workflows/repo_linter.sh'
+      - 'tests/repo_linter_test.sh'
 
 permissions:
   contents: read
@@ -45,22 +48,41 @@ jobs:
         run: |
           set -euo pipefail
 
-          repo_to_lint=$(
-            {
-              git diff origin/main -- readme.md |
-                grep '^+' |
-                grep -Eo 'https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#readme' |
-                sed 's/#readme//' |
-                head -n 1
-            } || true
-          )
+          normalize_repo_url() {
+            local candidate=$1
+            local github_repo_url='^https://github\.com/[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9._-]+#readme$'
+
+            if [[ ! $candidate =~ $github_repo_url ]]; then
+              return 1
+            fi
+
+            printf '%s\n' "${candidate%#readme}"
+          }
+
+          extract_repo_to_lint() {
+            local line
+            local candidate
+
+            while IFS= read -r line; do
+              [[ $line == +* ]] || continue
+              [[ $line != +++* ]] || continue
+
+              while IFS= read -r candidate; do
+                normalize_repo_url "$candidate" && return 0
+              done < <(printf '%s\n' "${line#+}" | grep -Eo 'https://[^[:space:])>]+' || true)
+            done
+          }
+
+          repo_to_lint=$(git diff origin/main -- readme.md | extract_repo_to_lint || true)
 
           if [ -z "$repo_to_lint" ]; then
-            echo "No new link found in the format: https://github.com/user/repo#readme"
+            echo "No new GitHub link found in the format: https://github.com/owner/repo#readme"
             exit 0
           fi
 
+          clone_dir=$(mktemp -d)
+          trap 'rm -rf "$clone_dir"' EXIT
+
           echo "Cloning $repo_to_lint"
-          git clone --depth 1 "$repo_to_lint" cloned
-          cd cloned
-          npx awesome-lint
+          git clone --depth 1 --single-branch -- "$repo_to_lint" "$clone_dir"
+          npm exec --yes --package=awesome-lint -- awesome-lint "$clone_dir/readme.md"
